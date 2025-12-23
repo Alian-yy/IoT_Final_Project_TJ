@@ -40,3 +40,5 @@ sudo ufw enable
 sudo ufw status
 ```
 ![img.png](assets/img3.png)
+
+服务器IP: 192.168.1.10
