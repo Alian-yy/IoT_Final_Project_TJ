@@ -1,0 +1,82 @@
+========================================
+小嘉智能环境监控系统 - 订阅端快速开始
+========================================
+
+【问题1：pandas无法解析】
+解决方案：如果只是测试订阅功能，不需要安装pandas！
+订阅功能只需要 paho-mqtt 库。
+
+【问题2：pip安装错误（setuptools错误）】
+解决方案：先升级pip和setuptools
+python -m pip install --upgrade pip setuptools wheel
+然后安装：pip install paho-mqtt
+
+【快速测试订阅功能（推荐）】
+
+步骤1：升级pip和setuptools（如果遇到安装错误）
+------------------------
+python -m pip install --upgrade pip setuptools wheel
+
+步骤2：安装最小依赖
+------------------------
+pip install paho-mqtt
+
+或者：
+pip install -r requirements_minimal.txt
+
+步骤2：运行测试脚本
+------------------------
+python test_subscribe.py
+
+步骤3：修改配置（如果需要）
+------------------------
+编辑 test_subscribe.py 文件，修改：
+- MQTT_BROKER = "118.31.63.5"  # MQTT服务器地址
+- MQTT_PORT = 1883
+- SENSOR_TYPES = ["all"]  # 订阅全部 (sensor/#)，或选择 ["temperature", "humidity", "pressure"]
+
+步骤4：查看数据
+------------------------
+数据会自动保存到 data/ 文件夹，按类别分成三个JSON文件：
+data/
+  ├── temperature.json  (温度数据)
+  ├── humidity.json    (湿度数据)
+  └── pressure.json    (气压数据)
+
+每个文件每行一个JSON对象，格式：时间、类别(topic)、值
+可以直接打开查看。
+
+【完整功能（需要数据分析）】
+
+如果需要使用数据分析功能（最小二乘法等），需要安装完整依赖：
+pip install -r requirements.txt
+
+然后启动完整服务：
+python main.py
+
+========================================
+常见问题
+========================================
+
+Q: 连接失败怎么办？
+A: 检查：
+   1. MQTT服务器是否运行
+   2. 地址和端口是否正确
+   3. 是否需要用户名密码
+
+Q: 数据没有保存？
+A: 检查：
+   1. 是否有写入权限
+   2. 控制台是否有错误信息
+   3. 订阅是否成功（查看控制台输出）
+
+Q: 如何只订阅温度数据？
+A: 修改 test_subscribe.py 中的：
+   SENSOR_TYPES = ["temperature"]
+   
+Q: 如何订阅全部数据？
+A: 使用：
+   SENSOR_TYPES = ["all"]  # 这会订阅 sensor/# (全部传感器数据)
+
+========================================
+
