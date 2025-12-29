@@ -23,11 +23,23 @@ class PublisherService {
     }
   }
 
-  disconnect() {
-    this.isConnected = false
-    if (this.wsConnection) {
-      this.wsConnection.close()
-      this.wsConnection = null
+  async disconnect() {
+    try {
+      // 调用后端 API 断开 MQTT 连接
+      await axios.post(`${API_BASE_URL}/mqtt/disconnect`)
+      this.isConnected = false
+      if (this.wsConnection) {
+        this.wsConnection.close()
+        this.wsConnection = null
+      }
+    } catch (error) {
+      // 即使后端断开失败，也要清理前端状态
+      this.isConnected = false
+      if (this.wsConnection) {
+        this.wsConnection.close()
+        this.wsConnection = null
+      }
+      throw new Error(error.response?.data?.detail || '断开连接失败')
     }
   }
 

@@ -265,13 +265,18 @@ const connectBroker = async () => {
   }
 }
 
-const disconnectBroker = () => {
-  publisherService.disconnect()
-  isConnected.value = false
-  if (isPublishing.value) {
-    stopPublish()
+const disconnectBroker = async () => {
+  try {
+    if (isPublishing.value) {
+      await stopPublish()
+    }
+    await publisherService.disconnect()
+    isConnected.value = false
+    addLog('✅ 已断开MQTT连接')
+  } catch (error) {
+    isConnected.value = false
+    addLog(`❌ 断开连接时出错: ${error.message}`)
   }
-  addLog('❌ 已断开连接')
 }
 
 const startPublish = async () => {
