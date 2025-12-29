@@ -400,6 +400,20 @@ async def mqtt_connect(config: MQTTConfig):
         raise HTTPException(status_code=500, detail=f"Connection failed: {str(e)}")
 
 
+@app.get("/mqtt/status")
+async def mqtt_status():
+    """获取MQTT连接状态"""
+    is_mqtt_connected = state.mqtt_client is not None
+    return {
+        "is_connected": is_mqtt_connected,
+        "is_publishing": state.is_publishing,
+        "current_index": state.current_index,
+        "total_records": state.status.total_records,
+        "published_count": state.status.published_count,
+        "progress": state.status.progress
+    }
+
+
 @app.post("/mqtt/disconnect")
 async def mqtt_disconnect():
     """断开MQTT连接"""

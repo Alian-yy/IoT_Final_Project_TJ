@@ -40,6 +40,15 @@ class PublisherService {
     }
   }
 
+  async getMqttStatus() {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/mqtt/status`)
+      return response.data
+    } catch (error) {
+      throw new Error(error.response?.data?.detail || '获取MQTT状态失败')
+    }
+  }
+
   async startPublish(config) {
     try {
       const response = await axios.post(`${API_BASE_URL}/publish/start`, config)

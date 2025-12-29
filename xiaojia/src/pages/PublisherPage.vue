@@ -371,6 +371,70 @@ onMounted(async () => {
   } catch (error) {
     console.error('Failed to load data info:', error)
   }
+
+  // 同步后端的MQTT连接状态和发布状态
+  try {
+    const mqttStatus = await publisherService.getMqttStatus()
+    
+    // 更新连接状态
+    if (mqttStatus.is_connected) {
+      isConnected.value = true
+      publisherService.isConnected = true
+      addLog('✅ 检测到活跃的MQTT连接')
+    }
+    
+    // 更新发布状态
+    if (mqttStatus.is_publishing) {
+      isPublishing.value = true
+      publishConfig.currentIndex = mqttStatus.current_index || 0
+      publishConfig.totalCount = mqttStatus.total_records || 0
+      publishCount.value = mqttStatus.published_count || 0
+      addLog(`📊 检测到正在进行的发布任务（进度: ${publishCount.value}/${publishConfig.totalCount}）`)
+      
+      // 重新连接WebSocket以接收实时更新
+      publisherService.connectWebSocket((data) => {
+        if (data.type === 'progress') {
+          publishConfig.currentIndex = data.published
+          publishCount.value = data.published
+          
+          if (data.current_message) {
+            // current_message 现在是一个数组，包含三种类型的消息
+            if (Array.isArray(data.current_message)) {
+              // 显示所有三条消息
+              data.current_message.forEach(msg => {
+                addLog(`[${msg.timestamp}] ${msg.topic} → ${msg.type}: ${msg.value}`)
+              })
+            } else {
+              // 兼容单条消息（手动发布的情况）
+              const msg = data.current_message
+              addLog(`[${msg.timestamp}] ${msg.topic} → ${msg.type}: ${msg.value}`)
+            }
+          }
+        } else if (data.type === 'stopped') {
+          // 手动停止（还有未发布的数据）
+          isPublishing.value = false
+          publishConfig.currentIndex = data.current_index || 0
+        } else if (data.type === 'complete') {
+          // 全部发布完成
+          isPublishing.value = false
+          publishConfig.currentIndex = 0
+          addLog('✅ 所有数据发布完成')
+        } else if (data.type === 'error') {
+          isPublishing.value = false
+          addLog(`❌ 发布错误: ${data.message}`)
+        }
+      })
+    } else if (mqttStatus.current_index > 0) {
+      // 有暂停的发布任务
+      publishConfig.currentIndex = mqttStatus.current_index
+      publishConfig.totalCount = mqttStatus.total_records || 0
+      publishCount.value = mqttStatus.published_count || 0
+      addLog(`📌 检测到暂停的发布任务（位置: ${mqttStatus.current_index}/${publishConfig.totalCount}）`)
+    }
+  } catch (error) {
+    console.error('Failed to sync MQTT status:', error)
+    addLog('⚠️  无法获取后端状态，请检查后端服务是否运行')
+  }
 })
 
 onUnmounted(() => {
