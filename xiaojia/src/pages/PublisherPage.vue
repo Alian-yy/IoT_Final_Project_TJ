@@ -197,7 +197,7 @@ const logContainer = ref(null)
 
 // 配置
 const config = reactive({
-  broker: '192.168.1.10',
+  broker: '118.31.63.5',
   port: 1883
 })
 

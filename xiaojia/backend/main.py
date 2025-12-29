@@ -33,8 +33,8 @@ app.add_middleware(
 
 # ==================== 数据模型 ====================
 class MQTTConfig(BaseModel):
-    broker: str = "localhost"
-    port: int = 1883
+    broker: str = "118.31.63.5"  # 默认MQTT Broker地址
+    port: int = 1883   #后端Python程序通过这个端口连接到192.168.1.10的MQTT Broker
     username: Optional[str] = None
     password: Optional[str] = None
 
@@ -361,7 +361,8 @@ async def mqtt_connect(config: MQTTConfig):
             state.mqtt_client = None
         
         # 创建MQTT客户端
-        print(f"🔗 正在连接到 {config.broker}:{config.port}...")
+        print(f"🔗 正在连接到 {config.broker}:{config.port}...")        
+        print(f"📋 收到的配置: broker={config.broker}, port={config.port}")        
         client = mqtt.Client()
         
         if config.username and config.password:
@@ -370,7 +371,8 @@ async def mqtt_connect(config: MQTTConfig):
         # 连接回调
         def on_connect(client, userdata, flags, rc):
             if rc == 0:
-                print(f"✅ 已连接到 MQTT Broker: {config.broker}:{config.port}")
+                print(f"✅ 已成功连接到 MQTT Broker: {config.broker}:{config.port}")
+                print(f"📡 实际连接地址: {config.broker}")
             else:
                 print(f"❌ 连接失败，返回码: {rc}")
         
@@ -389,7 +391,9 @@ async def mqtt_connect(config: MQTTConfig):
         
         return {
             "status": "success",
-            "message": f"Connected to {config.broker}:{config.port}"
+            "message": f"Connected to {config.broker}:{config.port}",
+            "broker_address": config.broker,
+            "broker_port": config.port
         }
     except Exception as e:
         print(f"❌ 连接异常: {str(e)}")
