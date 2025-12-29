@@ -8,7 +8,7 @@
         :status="mqttWsConnected ? 'online' : 'offline'"
         icon="📡"
       />
-      <MiniCard title="已接收" :value="totalReceived.toString()" :highlight="true" />
+      <MiniCard title="已处理" :value="processedCount.toString()" :highlight="true" />
       <MiniCard title="订阅主题数" :value="selectedTypes.length.toString()" :highlight="true" />
     </div>
 
@@ -281,9 +281,8 @@ const logs = ref([])
 const sparkW = 300
 const sparkH = 80
 
-const totalReceived = computed(() => {
-  return Object.values(statistics.value).reduce((a, b) => a + b, 0)
-})
+// 仅统计“前端已处理”的条数（节流后每 0.2s 最多处理 1 条）
+const processedCount = ref(0)
 
 const statistics = ref({ temperature: 0, humidity: 0, pressure: 0 })
 
@@ -293,6 +292,60 @@ function addLog(msg) {
   const line = `[${new Date().toLocaleTimeString()}] ${msg}`
   logs.value.push(line)
   if (logs.value.length > 200) logs.value.shift()
+}
+
+// ========= 前端处理节流（每 0.2 秒处理 1 条）=========
+const THROTTLE_MS = 200
+const incomingQueue = ref([])
+let throttleTimer = null
+
+function enqueueIncoming(item) {
+  incomingQueue.value.push(item)
+  // 防止队列无限增长：超过阈值丢弃较旧的数据
+  if (incomingQueue.value.length > 2000) {
+    incomingQueue.value.splice(0, incomingQueue.value.length - 500)
+  }
+}
+
+function processOne(item) {
+  const { topic, sensorType, value, timestamp } = item
+
+  if (sensorType in currentValues) {
+    currentValues[sensorType] = value
+    lastUpdated[sensorType] = (timestamp || '').replace('T', ' ').slice(0, 19)
+
+    const n = Number(value)
+    if (Number.isFinite(n)) {
+      history[sensorType].push({ t: timestamp, v: n })
+      if (history[sensorType].length > 60) history[sensorType].shift()
+    }
+
+    // 本地统计（按前端处理条数统计）
+    statistics.value = {
+      ...statistics.value,
+      [sensorType]: (statistics.value[sensorType] || 0) + 1
+    }
+    processedCount.value += 1
+
+    updateXiaojia(sensorType, value)
+    addLog(`📥 ${topic} = ${value}`)
+  }
+}
+
+function startThrottle() {
+  if (throttleTimer) return
+  throttleTimer = setInterval(() => {
+    if (incomingQueue.value.length === 0) return
+    const item = incomingQueue.value.shift()
+    if (item) processOne(item)
+  }, THROTTLE_MS)
+}
+
+function stopThrottle() {
+  if (throttleTimer) {
+    clearInterval(throttleTimer)
+    throttleTimer = null
+  }
 }
 
 function applyBackendApi() {
@@ -357,6 +410,8 @@ function clearData() {
   lastUpdated.humidity = null
   lastUpdated.pressure = null
   statistics.value = { temperature: 0, humidity: 0, pressure: 0 }
+  processedCount.value = 0
+  incomingQueue.value = []
   xiaojiaMood.value = 'normal'
   xiaojiaTip.value = '已清空数据，等待新消息...'
   markerStatus.value = 'normal'
@@ -440,28 +495,17 @@ function handleWsMessage(msg) {
   if (msg.type === 'status' && msg.status) {
     backendConnected.value = !!msg.status.is_connected
     subscribedTypes.value = msg.status.subscribed_types || []
-    statistics.value = msg.status.total_received || statistics.value
+    // 后端统计可用于对比，但前端“已处理”计数以本地 processedCount 为准
     return
   }
   if (msg.type === 'data' && msg.data) {
     const d = msg.data
-    statistics.value = msg.statistics || statistics.value
     const topic = d.topic || ''
     const sensorType = d.sensor_type || (topic.split('/').pop() || '')
     const v = d.value
     const ts = d.timestamp || d.received_at || new Date().toISOString()
 
-    if (sensorType in currentValues) {
-      currentValues[sensorType] = v
-      lastUpdated[sensorType] = (ts || '').replace('T', ' ').slice(0, 19)
-      const n = Number(v)
-      if (Number.isFinite(n)) {
-        history[sensorType].push({ t: ts, v: n })
-        if (history[sensorType].length > 60) history[sensorType].shift()
-      }
-      updateXiaojia(sensorType, v)
-      addLog(`📥 ${topic} = ${v}`)
-    }
+    enqueueIncoming({ source: 'backend', topic, sensorType, value: v, timestamp: ts })
   }
 }
 
@@ -564,25 +608,7 @@ function connectMqttWs() {
       const v = data.value
       const ts = data.timestamp || new Date().toISOString()
 
-      if (sensorType in currentValues) {
-        currentValues[sensorType] = v
-        lastUpdated[sensorType] = (ts || '').replace('T', ' ').slice(0, 19)
-
-        const n = Number(v)
-        if (Number.isFinite(n)) {
-          history[sensorType].push({ t: ts, v: n })
-          if (history[sensorType].length > 60) history[sensorType].shift()
-        }
-
-        // 本地统计计数
-        statistics.value = {
-          ...statistics.value,
-          [sensorType]: (statistics.value[sensorType] || 0) + 1
-        }
-
-        updateXiaojia(sensorType, v)
-        addLog(`📥 ${topic} = ${v}`)
-      }
+      enqueueIncoming({ source: 'mqtt', topic, sensorType, value: v, timestamp: ts })
     } catch {
       // ignore
     }
@@ -606,6 +632,7 @@ function disconnectMqttWs() {
 onMounted(async () => {
   applyBackendApi()
   await refreshStatus()
+  startThrottle()
   subscriberService.connectWebSocket(handleWsMessage, (s) => {
     wsConnected.value = !!s.connected
   })
@@ -614,6 +641,7 @@ onMounted(async () => {
 onUnmounted(() => {
   subscriberService.disconnectWebSocket()
   disconnectMqttWs()
+  stopThrottle()
 })
 
 watch(
