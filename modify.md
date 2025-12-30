@@ -219,6 +219,11 @@ register_tortoise(
 
 前端连接 Broker **必须使用 WebSocket 端口 (9001)**。
 
+### 前端技术栈
+```bash
+cd xiaojia; npm install echarts vue-echarts
+```
+
 #### 1. 发布端 (Publisher)
 
 ```html
