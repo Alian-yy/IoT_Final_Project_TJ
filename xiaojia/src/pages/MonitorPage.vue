@@ -25,26 +25,31 @@
           <div class="comfort-message">{{ currentComfort?.message || '等待数据...' }}</div>
         </div>
         <div class="comfort-details">
-          <div class="detail-item">
+          <!-- 动态显示订阅的传感器数据 -->
+          <div v-if="sharedData.subscribedTypes.value.includes('temperature')" class="detail-item">
             <span class="detail-label">温度</span>
             <span class="detail-value">{{ formatValue(currentValues.temperature, '°C') }}</span>
             <span class="detail-status" :class="getStatusClass(currentComfort?.details?.temperature?.level)">
               {{ getStatusText(currentComfort?.details?.temperature?.level) }}
             </span>
           </div>
-          <div class="detail-item">
+          <div v-if="sharedData.subscribedTypes.value.includes('humidity')" class="detail-item">
             <span class="detail-label">湿度</span>
             <span class="detail-value">{{ formatValue(currentValues.humidity, '%') }}</span>
             <span class="detail-status" :class="getStatusClass(currentComfort?.details?.humidity?.level)">
               {{ getStatusText(currentComfort?.details?.humidity?.level) }}
             </span>
           </div>
-          <div class="detail-item">
+          <div v-if="sharedData.subscribedTypes.value.includes('pressure')" class="detail-item">
             <span class="detail-label">气压</span>
             <span class="detail-value">{{ formatValue(currentValues.pressure, 'hPa') }}</span>
             <span class="detail-status" :class="getStatusClass(currentComfort?.details?.pressure?.level)">
               {{ getStatusText(currentComfort?.details?.pressure?.level) }}
             </span>
+          </div>
+          <div v-if="sharedData.subscribedTypes.value.length === 0" class="detail-item">
+            <span class="detail-label">提示</span>
+            <span class="detail-value">请在订阅页面订阅传感器数据</span>
           </div>
         </div>
       </div>
@@ -88,7 +93,7 @@
           </div>
         </div>
         <div class="panel-content">
-          <!-- 温度预测 -->
+          <!-- 动态显示订阅的传感器预测图表 -->
           <div v-if="hasData('temperature')" class="prediction-chart">
             <div class="chart-title">🌡️ 温度预测</div>
             <div class="chart-container">
@@ -96,7 +101,6 @@
             </div>
           </div>
           
-          <!-- 湿度预测 -->
           <div v-if="hasData('humidity')" class="prediction-chart">
             <div class="chart-title">💧 湿度预测</div>
             <div class="chart-container">
@@ -104,7 +108,6 @@
             </div>
           </div>
           
-          <!-- 气压预测 -->
           <div v-if="hasData('pressure')" class="prediction-chart">
             <div class="chart-title">📊 气压预测</div>
             <div class="chart-container">
@@ -114,7 +117,9 @@
           
           <div v-if="!hasAnyData()" class="chart-empty">
             <div class="empty-icon">📊</div>
-            <div class="empty-text">等待接收数据后自动生成预测图表</div>
+            <div class="empty-text">
+              {{ sharedData.subscribedTypes.value.length === 0 ? '请在订阅页面订阅传感器数据' : '等待接收数据后自动生成预测图表' }}
+            </div>
           </div>
         </div>
       </div>
@@ -236,6 +241,7 @@ import StatusCard from '@/components/StatusCard.vue'
 import MiniCard from '@/components/MiniCard.vue'
 import { subscriberService } from '@/services/subscriberService'
 import { calculateComfort, calculateAverageComfort } from '@/utils/comfortCalculator'
+import { useSharedSensorData } from '@/composables/useSharedSensorData'
 import mqtt from 'mqtt'
 
 // 注册 ECharts 组件
@@ -249,27 +255,37 @@ use([
   DataZoomComponent
 ])
 
+// ========= 共享数据服务 =========
+const sharedData = useSharedSensorData()
+
 // ========= 连接状态 =========
-const isConnected = ref(false)
+const isConnected = computed(() => sharedData.subscribedTypes.value.length > 0 && sharedData.hasAnyData())
 const connectionStatus = computed(() => (isConnected.value ? '已连接' : '未连接'))
-const lastUpdateTime = ref('')
-
-// ========= MQTT WebSocket 连接 =========
-const mqttWs = reactive({
-  url: 'ws://118.31.63.5:9001/mqtt'
+const lastUpdateTime = computed(() => {
+  const times = sharedData.subscribedTypes.value
+    .map(type => sharedData.lastUpdated[type])
+    .filter(Boolean)
+  if (times.length === 0) return ''
+  return times[times.length - 1] || ''
 })
-const mqttWsClient = ref(null)
-const mqttWsConnected = ref(false)
 
-// ========= 当前数据 =========
-const currentValues = reactive({
-  temperature: null,
-  humidity: null,
-  pressure: null
-})
+// ========= 当前数据（从共享服务读取）=========
+const currentValues = computed(() => ({
+  temperature: sharedData.currentValues.temperature,
+  humidity: sharedData.currentValues.humidity,
+  pressure: sharedData.currentValues.pressure
+}))
 
 // ========= 舒适度 =========
-const currentComfort = ref(null)
+const currentComfort = computed(() => {
+  const availableTypes = sharedData.getAvailableTypes()
+  return calculateComfort(
+    currentValues.value.temperature,
+    currentValues.value.humidity,
+    currentValues.value.pressure,
+    availableTypes.length > 0 ? availableTypes : null
+  )
+})
 
 // ========= 预测数据 =========
 const predictHours = ref(24)
@@ -288,12 +304,8 @@ const historyEndTime = ref('')
 const loadingHistory = ref(false)
 const historyAverage = ref(null)
 
-// ========= 历史数据存储 =========
-const historyData = reactive({
-  temperature: [],
-  humidity: [],
-  pressure: []
-})
+// ========= 历史数据存储（从共享服务读取）=========
+const historyData = computed(() => sharedData.historyData)
 
 // ========= 获取Y轴范围配置 =========
 function getYAxisRange(sensorType, historicalData, futureData) {
@@ -530,12 +542,14 @@ const pressureChartOption = computed(() => {
 
 // ========= 检查数据是否存在 =========
 function hasData(sensorType) {
-  return predictionData[sensorType] !== null && 
+  // 检查是否订阅了该类型且有预测数据
+  return sharedData.subscribedTypes.value.includes(sensorType) &&
+         predictionData[sensorType] !== null && 
          predictionData[sensorType]?.historical?.length > 0
 }
 
 function hasAnyData() {
-  return hasData('temperature') || hasData('humidity') || hasData('pressure')
+  return sharedData.subscribedTypes.value.some(type => hasData(type))
 }
 
 // ========= 工具函数 =========
@@ -582,131 +596,37 @@ function getStatusText(level) {
   return map[level] || level
 }
 
-// ========= 更新舒适度 =========
-function updateComfort() {
-  currentComfort.value = calculateComfort(
-    currentValues.temperature,
-    currentValues.humidity,
-    currentValues.pressure
-  )
-  lastUpdateTime.value = new Date().toLocaleTimeString('zh-CN')
-}
+// ========= 更新舒适度（已通过computed自动更新）=========
+// 不再需要手动更新函数，因为使用了computed
 
-// ========= MQTT 消息处理 =========
-function handleMqttMessage(topic, payload) {
-  try {
-    const str = payload.toString()
-    const data = JSON.parse(str)
-    const sensorType = topic.split('/').pop()
-    const v = data.value
-    const ts = data.timestamp || new Date().toISOString()
-
-    if (sensorType in currentValues) {
-      currentValues[sensorType] = v
-      const n = Number(v)
-      if (Number.isFinite(n)) {
-        historyData[sensorType].push({ t: ts, v: n })
-        if (historyData[sensorType].length > 1000) {
-          historyData[sensorType].shift()
-        }
-        
-        // 当数据积累到一定数量时，自动生成预测
-        if (historyData[sensorType].length >= 10 && historyData[sensorType].length % 10 === 0) {
-          generatePrediction(sensorType)
-        }
-      }
-      updateComfort()
-    }
-  } catch (e) {
-    console.error('处理MQTT消息失败:', e)
-  }
-}
-
-// ========= 连接MQTT =========
-function connectMqttWs() {
-  if (!mqttWs.url) {
-    return
-  }
-
-  if (mqttWsClient.value) {
-    try {
-      mqttWsClient.value.end(true)
-    } catch {
-      // ignore
-    }
-    mqttWsClient.value = null
-  }
-
-  const options = {
-    clientId: `monitor_${crypto.randomUUID?.() || Math.random().toString(16).slice(2)}`,
-    clean: true,
-    reconnectPeriod: 2000,
-    connectTimeout: 5000
-  }
-
-  const client = mqtt.connect(mqttWs.url, options)
-  mqttWsClient.value = client
-
-  client.on('connect', () => {
-    mqttWsConnected.value = true
-    isConnected.value = true
-    // 订阅所有传感器主题
-    client.subscribe('sensor/temperature', { qos: 1 })
-    client.subscribe('sensor/humidity', { qos: 1 })
-    client.subscribe('sensor/pressure', { qos: 1 })
-  })
-
-  client.on('reconnect', () => {
-    isConnected.value = false
-  })
-
-  client.on('close', () => {
-    mqttWsConnected.value = false
-    isConnected.value = false
-  })
-
-  client.on('error', (err) => {
-    console.error('MQTT错误:', err)
-    mqttWsConnected.value = false
-    isConnected.value = false
-  })
-
-  client.on('message', handleMqttMessage)
-}
-
-// ========= 断开MQTT =========
-function disconnectMqttWs() {
-  if (mqttWsClient.value) {
-    try {
-      mqttWsClient.value.end(true)
-    } catch {
-      // ignore
-    }
-    mqttWsClient.value = null
-  }
-  mqttWsConnected.value = false
-  isConnected.value = false
-}
+// ========= MQTT连接已移除，改为从共享服务读取数据 =========
+// MonitorPage 不再直接连接MQTT，而是从 SubscriberPage 的共享数据服务读取数据
 
 // ========= 为单个传感器类型生成预测 =========
 async function generatePrediction(sensorType) {
+  // 检查是否订阅了该类型
+  if (!sharedData.subscribedTypes.value.includes(sensorType)) {
+    return
+  }
+  
   // 如果本地数据不足，跳过
-  if (!historyData[sensorType] || historyData[sensorType].length < 10) {
+  const localData = historyData.value[sensorType] || []
+  if (localData.length < 10) {
     return
   }
 
-  const localData = historyData[sensorType].slice(-200) // 使用最近200个数据点
+  const dataToUse = localData.slice(-200) // 使用最近200个数据点
   
   // 简单的线性回归预测
-  const values = localData.map(d => d.v)
+  const values = dataToUse.map(d => d.v)
   const n = values.length
   
   // 计算时间间隔（秒）
   let interval = 3600 // 默认1小时
-  if (localData.length > 1) {
-    const timeDiff = new Date(localData[localData.length - 1].t).getTime() - 
-                     new Date(localData[0].t).getTime()
-    interval = timeDiff / (localData.length - 1)
+  if (dataToUse.length > 1) {
+    const timeDiff = new Date(dataToUse[dataToUse.length - 1].t).getTime() - 
+                     new Date(dataToUse[0].t).getTime()
+    interval = timeDiff / (dataToUse.length - 1)
   }
 
   // 线性回归计算
@@ -723,14 +643,14 @@ async function generatePrediction(sensorType) {
   const intercept = (sumY - slope * sumX) / n
 
   // 准备历史数据
-  const historical = localData.map((item, idx) => ({
+  const historical = dataToUse.map((item, idx) => ({
     timestamp: item.t,
     actual: item.v,
     predicted: slope * (idx + 1) + intercept
   }))
 
   // 生成未来预测
-  const lastTime = new Date(localData[localData.length - 1].t).getTime()
+  const lastTime = new Date(dataToUse[dataToUse.length - 1].t).getTime()
   const future = []
   for (let i = 1; i <= predictHours.value; i++) {
     const futureTime = lastTime + i * interval
@@ -752,18 +672,16 @@ async function generatePrediction(sensorType) {
 async function updateAllPredictions() {
   loadingPrediction.value = true
   try {
-    // 为每个有数据的传感器类型生成预测
+    // 只为订阅的传感器类型生成预测
     const promises = []
+    const subscribedTypes = sharedData.subscribedTypes.value
     
-    if (historyData.temperature && historyData.temperature.length >= 10) {
-      promises.push(generatePrediction('temperature'))
-    }
-    if (historyData.humidity && historyData.humidity.length >= 10) {
-      promises.push(generatePrediction('humidity'))
-    }
-    if (historyData.pressure && historyData.pressure.length >= 10) {
-      promises.push(generatePrediction('pressure'))
-    }
+    subscribedTypes.forEach(type => {
+      const data = historyData.value[type] || []
+      if (data.length >= 10) {
+        promises.push(generatePrediction(type))
+      }
+    })
 
     if (promises.length === 0) {
       alert('数据不足，请先等待接收一些数据后再进行预测（至少需要10个数据点）')
@@ -810,21 +728,28 @@ async function loadHistoryAverage() {
     let timeRange = null
 
     if (historyMode.value === 'count') {
-      // 按数据条数模式：使用本地历史数据
+      // 按数据条数模式：使用共享历史数据
       const count = historyCount.value
+      const data = historyData.value
       
-      tempFiltered = historyData.temperature.slice(-count).map(item => ({
-        timestamp: item.t,
-        value: item.v
-      }))
-      humidFiltered = historyData.humidity.slice(-count).map(item => ({
-        timestamp: item.t,
-        value: item.v
-      }))
-      pressFiltered = historyData.pressure.slice(-count).map(item => ({
-        timestamp: item.t,
-        value: item.v
-      }))
+      if (sharedData.subscribedTypes.value.includes('temperature') && data.temperature) {
+        tempFiltered = data.temperature.slice(-count).map(item => ({
+          timestamp: item.t,
+          value: item.v
+        }))
+      }
+      if (sharedData.subscribedTypes.value.includes('humidity') && data.humidity) {
+        humidFiltered = data.humidity.slice(-count).map(item => ({
+          timestamp: item.t,
+          value: item.v
+        }))
+      }
+      if (sharedData.subscribedTypes.value.includes('pressure') && data.pressure) {
+        pressFiltered = data.pressure.slice(-count).map(item => ({
+          timestamp: item.t,
+          value: item.v
+        }))
+      }
 
       if (tempFiltered.length > 0 || humidFiltered.length > 0 || pressFiltered.length > 0) {
         const allTimes = [
@@ -861,8 +786,9 @@ async function loadHistoryAverage() {
         end: endDate.toLocaleString('zh-CN')
       }
 
-      // 从本地历史数据中过滤时间范围
+      // 从共享历史数据中过滤时间范围
       const filterByTime = (data) => {
+        if (!data) return []
         return data.filter(item => {
           const itemTime = new Date(item.t)
           return itemTime >= startDate && itemTime <= endDate
@@ -872,9 +798,16 @@ async function loadHistoryAverage() {
         }))
       }
 
-      tempFiltered = filterByTime(historyData.temperature)
-      humidFiltered = filterByTime(historyData.humidity)
-      pressFiltered = filterByTime(historyData.pressure)
+      const data = historyData.value
+      if (sharedData.subscribedTypes.value.includes('temperature') && data.temperature) {
+        tempFiltered = filterByTime(data.temperature)
+      }
+      if (sharedData.subscribedTypes.value.includes('humidity') && data.humidity) {
+        humidFiltered = filterByTime(data.humidity)
+      }
+      if (sharedData.subscribedTypes.value.includes('pressure') && data.pressure) {
+        pressFiltered = filterByTime(data.pressure)
+      }
 
       // 如果本地数据不足，尝试从后端获取
       if (tempFiltered.length === 0 && humidFiltered.length === 0 && pressFiltered.length === 0) {
@@ -942,7 +875,7 @@ async function loadHistoryAverage() {
       }
     })
 
-    const avgComfort = calculateAverageComfort(comfortData)
+    const avgComfort = calculateAverageComfort(comfortData, sharedData.subscribedTypes.value)
 
     historyAverage.value = {
       temperature: avgTemp,
@@ -963,24 +896,32 @@ async function loadHistoryAverage() {
 
 // ========= 生命周期 =========
 onMounted(() => {
-  connectMqttWs()
-  // 初始化舒适度
-  updateComfort()
   // 初始化时间范围（默认最近24小时）
   onHistoryModeChange()
+  
+  // 监听共享数据变化，自动生成预测
+  watch(
+    () => [
+      sharedData.currentValues.temperature,
+      sharedData.currentValues.humidity,
+      sharedData.currentValues.pressure
+    ],
+    () => {
+      // 当数据积累到一定数量时，自动生成预测
+      sharedData.subscribedTypes.value.forEach(type => {
+        const data = historyData.value[type] || []
+        if (data.length >= 10 && data.length % 10 === 0) {
+          generatePrediction(type)
+        }
+      })
+    },
+    { deep: true }
+  )
 })
 
 onUnmounted(() => {
-  disconnectMqttWs()
+  // 不再需要断开MQTT，因为不再直接连接
 })
-
-// 监听数据变化，自动更新舒适度
-watch(
-  () => [currentValues.temperature, currentValues.humidity, currentValues.pressure],
-  () => {
-    updateComfort()
-  }
-)
 </script>
 
 <style scoped>

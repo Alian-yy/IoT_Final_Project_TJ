@@ -177,9 +177,13 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import MiniCard from '@/components/MiniCard.vue'
 import StatusCard from '@/components/StatusCard.vue'
 import { subscriberService } from '@/services/subscriberService'
+import { useSharedSensorData } from '@/composables/useSharedSensorData'
 import mqtt from 'mqtt'
 
 defineOptions({ name: 'SubscriberPage' })
+
+// ========= 共享数据服务 =========
+const sharedData = useSharedSensorData()
 
 // ========= 基础配置 =========
 const backendApiBase = ref('http://localhost:8002')
@@ -322,6 +326,9 @@ function processOne(item) {
       if (history[sensorType].length > 60) history[sensorType].shift()
     }
 
+    // 同步到共享数据服务
+    sharedData.updateSensorData(sensorType, value, timestamp)
+
     // 本地统计（按前端处理条数统计）
     statistics.value = {
       ...statistics.value,
@@ -386,6 +393,8 @@ async function refreshStatus() {
     const s = await subscriberService.getStatus()
     backendConnected.value = !!s.is_connected
     subscribedTypes.value = s.subscribed_types || []
+    // 同步订阅类型到共享服务
+    sharedData.updateSubscribedTypes(subscribedTypes.value)
   } catch {
     // ignore
   }
@@ -417,6 +426,8 @@ function clearData() {
   xiaojiaMood.value = 'normal'
   xiaojiaTip.value = '已清空数据，等待新消息...'
   markerStatus.value = 'normal'
+  // 清空共享数据
+  sharedData.clearAllData()
   addLog('🧹 已清空数据')
 }
 
@@ -497,7 +508,9 @@ function handleWsMessage(msg) {
   if (msg.type === 'status' && msg.status) {
     backendConnected.value = !!msg.status.is_connected
     subscribedTypes.value = msg.status.subscribed_types || []
-    // 后端统计可用于对比，但前端“已处理”计数以本地 processedCount 为准
+    // 同步订阅类型到共享服务
+    sharedData.updateSubscribedTypes(subscribedTypes.value)
+    // 后端统计可用于对比，但前端"已处理"计数以本地 processedCount 为准
     return
   }
   if (msg.type === 'data' && msg.data) {
@@ -517,6 +530,8 @@ async function loadLatest(type) {
     const r = await subscriberService.getLatestData(type, 100)
     const arr = (r.data || []).map((x) => ({ t: x.timestamp, v: Number(x.value) })).filter((x) => Number.isFinite(x.v))
     history[type] = arr.slice(-60)
+    // 同步历史数据到共享服务
+    sharedData.updateHistoryData(type, arr)
     addLog(`📦 已拉取 ${type} 最新 ${r.count || arr.length} 条`)
   } catch (e) {
     addLog(`❌ 拉取历史失败：${e.message || ''}`)
@@ -549,6 +564,9 @@ function applyMqttSubscriptions() {
       if (err) addLog(`❌ 订阅失败：${t}`)
     })
   })
+  subscribedTypes.value = [...selectedTypes.value]
+  // 同步订阅类型到共享服务
+  sharedData.updateSubscribedTypes(selectedTypes.value)
   addLog(`📡 已订阅（前端直连）：${topics.join(', ')}`)
 }
 
@@ -638,6 +656,8 @@ onMounted(async () => {
   subscriberService.connectWebSocket(handleWsMessage, (s) => {
     wsConnected.value = !!s.connected
   })
+  // 初始化时同步订阅类型到共享服务
+  sharedData.updateSubscribedTypes(subscribedTypes.value)
 })
 
 onUnmounted(() => {
