@@ -49,7 +49,12 @@
 
       <!-- 页面内容区域 -->
       <main class="page-content">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <!-- 仅缓存订阅页：避免切换页面时断开订阅端连接 -->
+          <keep-alive include="SubscriberPage">
+            <component :is="Component" />
+          </keep-alive>
+        </router-view>
       </main>
     </div>
   </div>

@@ -179,6 +179,8 @@ import StatusCard from '@/components/StatusCard.vue'
 import { subscriberService } from '@/services/subscriberService'
 import mqtt from 'mqtt'
 
+defineOptions({ name: 'SubscriberPage' })
+
 // ========= 基础配置 =========
 const backendApiBase = ref('http://localhost:8002')
 const connecting = ref(false)
