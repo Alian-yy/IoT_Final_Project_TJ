@@ -417,9 +417,10 @@ IoT_Final_Project_TJ/
 
 ```mermaid
 graph TD
-  DevPC[开发机/本地] -->|HTTP 5173| FE[前端 Vite Dev]
-  DevPC -->|HTTP 8001| PUB[FastAPI 发布端]
-  DevPC -->|HTTP 8002| SUB[FastAPI 订阅端]
+  PubHost[发布端主机/本地] -->|HTTP 8001| PUB[FastAPI 发布端]
+  SubHost[订阅端主机/本地] -->|HTTP 8002| SUB[FastAPI 订阅端]
+  SubHost -->|HTTP 5173| FE[前端 Vite Dev]
+  PubHost -->|HTTP 5173| FE
   PUB -->|MQTT| Broker[(MQTT Broker)]
   SUB -->|MQTT| Broker
   SUB -->|WebSocket/HTTP| FE
