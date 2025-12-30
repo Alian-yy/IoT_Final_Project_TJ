@@ -646,6 +646,8 @@ function disconnectMqttWs() {
   }
   mqttWsConnected.value = false
   mqttWsConnecting.value = false
+  // 清空待处理队列
+  incomingQueue.value = []
   addLog('ℹ️ 已断开 Broker WS')
 }
 
