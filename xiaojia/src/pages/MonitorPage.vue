@@ -295,6 +295,52 @@ const historyData = reactive({
   pressure: []
 })
 
+// ========= 获取Y轴范围配置 =========
+function getYAxisRange(sensorType, historicalData, futureData) {
+  // 合并所有数据点
+  const allValues = [
+    ...historicalData.map(item => item[1]),
+    ...futureData.map(item => item[1])
+  ].filter(v => v !== null && v !== undefined && Number.isFinite(v))
+
+  if (allValues.length === 0) {
+    return {}
+  }
+
+  const minValue = Math.min(...allValues)
+  const maxValue = Math.max(...allValues)
+  const range = maxValue - minValue
+
+  // 根据传感器类型设置不同的Y轴范围
+  if (sensorType === 'humidity') {
+    // 湿度：通常范围在 0-100%，设置合理的起始值
+    const min = Math.max(0, Math.floor(minValue - range * 0.2))
+    const max = Math.min(100, Math.ceil(maxValue + range * 0.2))
+    return {
+      min: min,
+      max: max
+    }
+  } else if (sensorType === 'pressure') {
+    // 气压：通常范围在 980-1040 hPa，设置合理的起始值
+    const min = Math.max(960, Math.floor(minValue - range * 0.2))
+    const max = Math.min(1060, Math.ceil(maxValue + range * 0.2))
+    return {
+      min: min,
+      max: max
+    }
+  } else if (sensorType === 'temperature') {
+    // 温度：根据实际数据范围动态调整，但不要从0开始
+    const min = Math.floor(minValue - range * 0.2)
+    const max = Math.ceil(maxValue + range * 0.2)
+    return {
+      min: min,
+      max: max
+    }
+  }
+
+  return {}
+}
+
 // ========= 创建图表配置函数 =========
 function createChartOption(sensorType, data) {
   if (!data || !data.historical || data.historical.length === 0) {
@@ -419,7 +465,9 @@ function createChartOption(sensorType, data) {
       nameTextStyle: { color: '#aaddff' },
       axisLabel: { color: '#aaddff' },
       axisLine: { lineStyle: { color: '#7ce7ff' } },
-      splitLine: { lineStyle: { color: 'rgba(124, 231, 255, 0.1)' } }
+      splitLine: { lineStyle: { color: 'rgba(124, 231, 255, 0.1)' } },
+      scale: true, // 启用缩放，自动调整范围
+      ...getYAxisRange(sensorType, historicalData, futureData)
     },
     series: [
       {
